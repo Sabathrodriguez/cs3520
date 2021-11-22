@@ -95,23 +95,29 @@
      (let ([bs (s-exp->list (first
                              (s-exp->list (second
                                            (s-exp->list s)))))])
-       (appE (lamE ....
-              ;(s-exp->symbol (first bs))
-              ;(parse-type (third bs))
-                   (parse (third (s-exp->list s))))
+       (appE (lamE 
+              (cons (values (s-exp->symbol (first bs)) ;good
+                            (parse-type (third bs))) empty)
+              (parse (third (s-exp->list s))))
              (parse-list (fourth bs))))]
-    [(s-exp-match? `{lambda {[SYMBOL : ANY]} ANY} s)
+    [(s-exp-match? `{lambda {[SYMBOL : ANY] ... } ANY} s)
      (let ([arg (s-exp->list
                  (first (s-exp->list 
                          (second (s-exp->list s)))))])
-       (lamE ....
-        ;(s-exp->symbol (first arg))
-        ;(parse-type (third arg))
-             (parse (third (s-exp->list s)))))]
+       (lamE 
+        (parse-vals (s-exp->list (second (s-exp->list s))))
+        (parse (third (s-exp->list s)))))]
     [(s-exp-match? `{ANY ANY ....} s)
      (appE (parse (first (s-exp->list s)))
            (parse-list (s-exp->list(second (s-exp->list s)))))]
     [else (error 'parse "invalid input")]))
+
+(define (parse-vals [args : (Listof S-Exp)]) : (Listof (Symbol * Type))
+  (type-case (Listof S-Exp) args
+    [empty empty]
+    [(cons fst rst) (cons
+                    (values (s-exp->symbol (first (s-exp->list fst))) (parse-type (second (s-exp->list fst))))
+                    (parse-vals rst) )]))
 
 (define (parse-list [args : (Listof S-Exp)]) : (Listof Exp)
   (type-case (Listof S-Exp) args
@@ -160,12 +166,12 @@
                (numE 8)))
   (test (parse `{let {[x : num {+ 1 2}]}
                   y})
-        (appE (lamE (list (values ('x (numT)))) (idE 'y))
-              (plusE (numE 1) (numE 2))))
+        (appE (lamE (list (values 'x (numT))) (idE 'y))
+              (list (plusE (numE 1) (numE 2)))))
   (test (parse `{lambda {[x : num]} 9})
-        (lamE 'x (numT) (numE 9)))
+        (lamE (list (values 'x (numT))) (numE 9)))
   (test (parse `{double 9})
-        (appE (idE 'double) (numE 9)))
+        (appE (idE 'double) (list (numE 9))))
   (test/exn (parse `{})
             "invalid input")
 
@@ -192,10 +198,12 @@
     [(appE fun arg) (type-case Value (interp fun env)
                       [(closV n body c-env)
                        (interp body
+;-----------------------------------------------                               
                                (extend-env
                                 (bind n
                                       (interp arg env))
                                 c-env))]
+;-----------------------------------------------                      
                       [else (error 'interp "not a function")])]
     [(equalE l r) (if (equal? (interp l env) (interp r env))
                       (numV 1)
@@ -210,6 +218,8 @@
     [(sndE exp) (type-case Value (interp exp env)
                   [(pairV fst snd) snd]
                   [else (error 'interp "not a pair")]) ]))
+
+;(define (interp-list [args : (Listof Exp)]) : Env
 
 (module+ test
   (test (interp (parse `{let {[p : (num * num) {pair 10 8}]}
