@@ -15,10 +15,11 @@
          [r : Exp])
   (multE [l : Exp]
          [r : Exp])
-  (lamE (args : (Listof (Symbol * Type)))
+  (lamE [n : Symbol]
+        [arg-type : Type]
         [body : Exp])
   (appE [fun : Exp]
-        [arg : (Listof Exp)])
+        [arg : Exp])
   (equalE [l : Exp]
          [r : Exp])
   (ifE [cond : Exp]
@@ -91,33 +92,26 @@
           (ifE (parse(second (s-exp->list s)))
           (parse (third (s-exp->list s)))
           (parse (fourth (s-exp->list s))))))] 
-    [(s-exp-match? `{let {[SYMBOL : ANY ANY]} ANY ... } s)
+[(s-exp-match? `{let {[SYMBOL : ANY ANY]} ANY} s)
      (let ([bs (s-exp->list (first
                              (s-exp->list (second
                                            (s-exp->list s)))))])
-       (appE (lamE 
-              (cons (values (s-exp->symbol (first bs)) ;good
-                            (parse-type (third bs))) empty)
-              (parse (third (s-exp->list s))))
-             (parse-list (fourth bs))))]
-    [(s-exp-match? `{lambda {[SYMBOL : ANY] ... } ANY} s)
+       (appE (lamE (s-exp->symbol (first bs))
+                   (parse-type (third bs))
+                   (parse (third (s-exp->list s))))
+             (parse (fourth bs))))]
+    [(s-exp-match? `{lambda {[SYMBOL : ANY]} ANY} s)
      (let ([arg (s-exp->list
                  (first (s-exp->list 
                          (second (s-exp->list s)))))])
        (lamE 
-        (parse-vals (s-exp->list (second (s-exp->list s))))
-        (parse (third (s-exp->list s)))))]
-    [(s-exp-match? `{ANY ANY ....} s)
+        (s-exp->symbol (first arg))
+        (parse-type (third arg))
+             (parse (third (s-exp->list s)))))]
+    [(s-exp-match? `{ANY ANY ...} s)
      (appE (parse (first (s-exp->list s)))
-           (parse-list (s-exp->list(second (s-exp->list s)))))]
+           (parse (second (s-exp->list s))))]
     [else (error 'parse "invalid input")]))
-
-(define (parse-vals [args : (Listof S-Exp)]) : (Listof (Symbol * Type))
-  (type-case (Listof S-Exp) args
-    [empty empty]
-    [(cons fst rst) (cons
-                    (values (s-exp->symbol (first (s-exp->list fst))) (parse-type (second (s-exp->list fst))))
-                    (parse-vals rst) )]))
 
 (define (parse-list [args : (Listof S-Exp)]) : (Listof Exp)
   (type-case (Listof S-Exp) args
@@ -164,14 +158,11 @@
   (test (parse `{+ {* 3 4} 8})
         (plusE (multE (numE 3) (numE 4))
                (numE 8)))
-  (test (parse `{let {[x : num {+ 1 2}]}
-                  y})
-        (appE (lamE (list (values 'x (numT))) (idE 'y))
-              (list (plusE (numE 1) (numE 2)))))
+
   (test (parse `{lambda {[x : num]} 9})
-        (lamE (list (values 'x (numT))) (numE 9)))
+        (lamE 'x (numT) (numE 9)))
   (test (parse `{double 9})
-        (appE (idE 'double) (list (numE 9))))
+        (appE (idE 'double) (numE 9)))
   (test/exn (parse `{})
             "invalid input")
 
@@ -193,17 +184,15 @@
     [(falsE) (numV 0)]
     [(plusE l r) (num+ (interp l env) (interp r env))]
     [(multE l r) (num* (interp l env) (interp r env))]
-    [(lamE args body)
-     (closV .... body env)]
+    [(lamE n t body)
+     (closV n body env)]
     [(appE fun arg) (type-case Value (interp fun env)
                       [(closV n body c-env)
                        (interp body
-;-----------------------------------------------                               
                                (extend-env
                                 (bind n
                                       (interp arg env))
                                 c-env))]
-;-----------------------------------------------                      
                       [else (error 'interp "not a function")])]
     [(equalE l r) (if (equal? (interp l env) (interp r env))
                       (numV 1)
@@ -218,8 +207,6 @@
     [(sndE exp) (type-case Value (interp exp env)
                   [(pairV fst snd) snd]
                   [else (error 'interp "not a pair")]) ]))
-
-;(define (interp-list [args : (Listof Exp)]) : Env
 
 (module+ test
   (test (interp (parse `{let {[p : (num * num) {pair 10 8}]}
@@ -350,13 +337,10 @@
     [(plusE l r) (typecheck-nums l r tenv)]
     [(multE l r) (typecheck-nums l r tenv)]
     [(idE n) (type-lookup n tenv)]
-    [(lamE args body)
-     ;;lamE n arg-type body
-     (arrowT ....
-      ;;arg-type
-             (typecheck body
-                                          ;n    ;arg-type
-                        (extend-env (tbind .... ....)
+[(lamE n arg-type body)
+     (arrowT arg-type
+             (typecheck body 
+                        (extend-env (tbind n arg-type)
                                     tenv)))]
     [(appE fun arg)
      (type-case Type (typecheck fun tenv)
@@ -490,5 +474,69 @@
                        mt-env)
             "no type")
   (test/exn (typecheck (parse `{* {lambda {[x : num]} x} 1})
+                       mt-env)
+            "no type"))
+
+(module+ test   (test (interp (parse `{pair 10 8})
+                mt-env)
+        ;; Your constructor might be different than pairV:
+        (pairV (numV 10) (numV 8)))
+  
+  (test (interp (parse `{fst {pair 10 8}})
+                mt-env)
+        (numV 10))
+  
+  (test (interp (parse `{snd {pair 10 8}})
+                mt-env)
+        (numV 8))
+  
+  (test (interp (parse `{let {[p : (num * num) {pair 10 8}]}
+                          {fst p}})
+                mt-env)
+        (numV 10))
+  
+  (test (typecheck (parse `{pair 10 8})
+                   mt-env)
+        ;; Your constructor might be different than crossT:
+        (pairT (numT) (numT)))
+  
+  (test (typecheck (parse `{fst {pair 10 8}})
+                   mt-env)
+        (numT))
+  
+  (test (typecheck (parse `{+ 1 {snd {pair 10 8}}})
+                   mt-env)
+        (numT))
+  
+  (test (typecheck (parse `{lambda {[x : (num * bool)]}
+                             {fst x}})
+                   mt-env)
+        ;; Your constructor might be different than crossT:
+        (arrowT (pairT (numT) (boolT)) (numT)))
+  
+  (test (typecheck (parse `{{lambda {[x : (num * bool)]}
+                              {fst x}}
+                            {pair 1 false}})
+                   mt-env)
+        (numT))
+  
+  (test (typecheck (parse `{{lambda {[x : (num * bool)]}
+                              {snd x}}
+                            {pair 1 false}})
+                   mt-env)
+        (boolT))
+  
+  (test/exn (typecheck (parse `{fst 10})
+                       mt-env)
+            "no type")
+  
+  (test/exn (typecheck (parse `{+ 1 {fst {pair false 8}}})
+                       mt-env)
+            "no type")
+  
+  (test/exn (typecheck (parse `{lambda {[x : (num * bool)]}
+                                 {if {fst x}
+                                     1
+                                     2}})
                        mt-env)
             "no type"))
