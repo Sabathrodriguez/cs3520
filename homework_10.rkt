@@ -337,7 +337,7 @@
     [(plusE l r) (typecheck-nums l r tenv)]
     [(multE l r) (typecheck-nums l r tenv)]
     [(idE n) (type-lookup n tenv)]
-[(lamE n arg-type body)
+    [(lamE n arg-type body)
      (arrowT arg-type
              (typecheck body 
                         (extend-env (tbind n arg-type)
