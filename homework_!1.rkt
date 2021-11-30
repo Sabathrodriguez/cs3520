@@ -356,24 +356,23 @@
                  (typecheck fun tenv)
                  fun)
          result-type))]
-    [(emptyE) (listofT (emptyT))]
+    [(emptyE) (emptyT)]
     [(consE l r) (local ([define left (typecheck l tenv)])
-                   (if (begin
-                         (unify! (typecheck r tenv) (listofT (emptyT)) r)
-                         #t)
-                       (listofT left)
+                   (local ([define right (typecheck r tenv)])
+                     (begin
+                       (unify! right (listofT left) r)
                        (begin
-                         (unify! (listofT left) (typecheck r tenv) l)
-                          left)))]
-    [(firstE a) (local ([define lst (typecheck a tenv)])
-                                  
-                  (type-case Type lst
-                  [(listofT el) lst]
-                  [else (type-error a lst (listofT lst))]))]
-    [(restE a) (local ([define lst (typecheck a tenv)])
-                  (type-case Type lst
-                  [(listofT el) lst]
-                  [else (type-error a lst (listofT lst))]))]))
+                         (unify! right (emptyT) r)
+                         (listofT right))
+                       right)))]
+    [(firstE a) (local ([define type-a (typecheck a tenv)])
+                  (begin
+                    (unify! type-a (listofT (emptyT)) a)
+                    type-a))]
+    [(restE a) (local ([define type-a (typecheck a tenv)])
+                  (begin
+                    (unify! type-a (listofT (emptyT)) a)
+                    type-a))]))
 
 (module+ test
 (test (run-prog `empty)
@@ -392,11 +391,31 @@
             "list is empty")
   (test/exn (run-prog `{rest empty})
             "list is empty")
+  
   (test (run-prog `{let {[f : ?
                             {lambda {[x : ?]} {first x}}]}
                      {+ {f {cons 1 empty}} 3}})
         `4)
+  (test (run-prog `{let {[f : ?
+                            {lambda {[x : ?]} {rest x}}]}
+                     {+ {first {f {cons 1 {cons 2 empty}}}} 3}})
+        `5)
+  (test (run-prog `{let {[f : ?
+                            {lambda {[x : ?]}
+                              {lambda {[y : ?]}
+                                {cons x y}}}]}
+                     {first {rest {{f 1} {cons 2 empty}}}}})
+        `2)
+
+  (test/exn (run-prog `{lambda {[x : ?]}
+                         {cons x x}})
+            "no type")
+(test/exn (run-prog `{let {[f : ? {lambda {[x : ?]} x}]}
+                         {cons {f 1} {f empty}}})
+            "no type")
+
   )
+
 
 (define (typecheck-nums l r tenv)
   (begin
@@ -503,8 +522,8 @@
                    (type-case (Optionof Type) (unbox is)
                      [(none) #f]
                      [(some t2) (occurs? r t2)]))]
-    [(listofT e) ....]
-    [(emptyT) ....]))
+    [(listofT e) (occurs? r e)]
+    [(emptyT) #f]))
 
 (define (type-error [a : Exp] [t1 : Type] [t2 : Type])
   (error 'typecheck (string-append
@@ -529,7 +548,9 @@
       [(listofT elements) (begin
                             (interp result mt-env)
                             `list)]
-      [(emptyT) `list]
+      [(emptyT) (begin
+                  (interp result mt-env)
+                  `list)]
       [(boolT) `bool]
       [(varT is) (type-case Type (resolve (typecheck result mt-env))
                 [(numT) (number->s-exp (numV-n (interp result mt-env))) ]
