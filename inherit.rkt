@@ -2,13 +2,10 @@
 
 ;; Make all "class.rkt" definitions available here, where
 ;; the "class.rkt" file must be in the same directory
-
+;; as this one:
+(require "class.rkt")
 
 (define-type ExpI
-  (selectI [num : ExpI]
-           [object : ExpI])
-  (instanceOfI [child : ExpI]
-               [parent : Symbol])
   (numI [n : Number])
   (plusI [lhs : ExpI]
          [rhs : ExpI])
@@ -24,7 +21,10 @@
          [method-name : Symbol]
          [arg-expr : ExpI])
   (superI [method-name : Symbol]
-          [arg-expr : ExpI]))
+          [arg-expr : ExpI])
+  (if0I [cond : ExpI]
+        [tr : ExpI]
+        [fls : ExpI]))
 
 (define-type ClassI
   (classI [super-name : Symbol]
@@ -43,12 +43,11 @@
       [(numI n) (numE n)]
       [(plusI l r) (plusE (recur l) (recur r))]
       [(multI l r) (multE (recur l) (recur r))]
+      [(if0I cond tr fls) (if0E (recur cond) (recur tr) (recur fls))]
       [(argI) (argE)]
-      [(instanceOfI child parent) (instanceOfE (recur child) parent)]
       [(thisI) (thisE)]
       [(newI class-name field-exprs)
        (newE class-name (map recur field-exprs))]
-      [(selectI num obj) (selectE (recur num) (recur obj))]
       [(getI expr field-name)
        (getE (recur expr) field-name)]
       [(sendI expr method-name arg-expr)
@@ -64,6 +63,10 @@
 (module+ test
   (test (exp-i->c (numI 10) 'Object)
         (numE 10))
+  (test (exp-i->c (if0I (numI 0) (numI 1) (numI 2)) 'Object)
+        (if0E (numE 0) (numE 1) (numE 2)))
+  (test (exp-i->c (if0I (thisI) (thisI) (thisI)) 'Object)
+        (if0E (thisE) (thisE) (thisE)))
   (test (exp-i->c (plusI (numI 10) (numI 2)) 'Object)
         (plusE (numE 10) (numE 2)))
   (test (exp-i->c (multI (numI 10) (numI 2)) 'Object)
@@ -91,8 +94,7 @@
       (map (lambda (m)
              (values (fst m)
                      (exp-i->c (snd m) super-name)))
-           methods)
-      empty)]))
+           methods))]))
 
 (module+ test
   (define posn3d-mdist-i-method
@@ -113,8 +115,7 @@
   (define posn3d-c-class-not-flat
     (values 'Posn3D
             (classC (list 'z)
-                    (list posn3d-mdist-c-method)
-                    empty)))
+                    (list posn3d-mdist-c-method))))
 
   (test (class-i->c-not-flat (snd posn3d-i-class))
         (snd posn3d-c-class-not-flat)))
@@ -125,13 +126,12 @@
                        [classes-not-flat : (Listof (Symbol * Class))] 
                        [i-classes : (Listof (Symbol * ClassI))]) : Class
   (type-case Class (find classes-not-flat name)
-    [(classC field-names methods parents)
+    [(classC field-names methods)
      (type-case Class (flatten-super name classes-not-flat i-classes)
-       [(classC super-field-names super-methods parents)
+       [(classC super-field-names super-methods)
         (classC
          (add-fields super-field-names field-names)
-         (add/replace-methods super-methods methods)
-         empty)])]))
+         (add/replace-methods super-methods methods))])]))
 
 (define (flatten-super [name : Symbol]
                        [classes-not-flat : (Listof (Symbol * Class))] 
@@ -139,7 +139,7 @@
   (type-case ClassI (find i-classes name)
     [(classI super-name field-names i-methods)
      (if (equal? super-name 'Object)
-         (classC empty empty empty)
+         (classC empty empty)
          (flatten-class super-name
                         classes-not-flat
                         i-classes))]))
@@ -167,14 +167,12 @@
             (list (values 'mdist
                           (plusE (getE (thisE) 'x)
                                  (getE (thisE) 'y)))
-                  addDist-c-method)
-            empty)))
+                  addDist-c-method))))
   (define posn3d-c-class
     (values 'Posn3D
             (classC (list 'x 'y 'z)
                     (list posn3d-mdist-c-method
-                          addDist-c-method)
-                    empty)))
+                          addDist-c-method))))
 
   (test (flatten-class 'Posn3D
                        (list posn-c-class-not-flat

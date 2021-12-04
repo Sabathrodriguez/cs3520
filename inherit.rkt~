@@ -2,10 +2,13 @@
 
 ;; Make all "class.rkt" definitions available here, where
 ;; the "class.rkt" file must be in the same directory
-;; as this one:
-(require "class.rkt")
+
 
 (define-type ExpI
+  (selectI [num : ExpI]
+           [object : ExpI])
+  (instanceOfI [child : ExpI]
+               [parent : Symbol])
   (numI [n : Number])
   (plusI [lhs : ExpI]
          [rhs : ExpI])
@@ -41,9 +44,11 @@
       [(plusI l r) (plusE (recur l) (recur r))]
       [(multI l r) (multE (recur l) (recur r))]
       [(argI) (argE)]
+      [(instanceOfI child parent) (instanceOfE (recur child) parent)]
       [(thisI) (thisE)]
       [(newI class-name field-exprs)
        (newE class-name (map recur field-exprs))]
+      [(selectI num obj) (selectE (recur num) (recur obj))]
       [(getI expr field-name)
        (getE (recur expr) field-name)]
       [(sendI expr method-name arg-expr)
@@ -86,7 +91,8 @@
       (map (lambda (m)
              (values (fst m)
                      (exp-i->c (snd m) super-name)))
-           methods))]))
+           methods)
+      empty)]))
 
 (module+ test
   (define posn3d-mdist-i-method
@@ -107,7 +113,8 @@
   (define posn3d-c-class-not-flat
     (values 'Posn3D
             (classC (list 'z)
-                    (list posn3d-mdist-c-method))))
+                    (list posn3d-mdist-c-method)
+                    empty)))
 
   (test (class-i->c-not-flat (snd posn3d-i-class))
         (snd posn3d-c-class-not-flat)))
@@ -118,12 +125,13 @@
                        [classes-not-flat : (Listof (Symbol * Class))] 
                        [i-classes : (Listof (Symbol * ClassI))]) : Class
   (type-case Class (find classes-not-flat name)
-    [(classC field-names methods)
+    [(classC field-names methods parents)
      (type-case Class (flatten-super name classes-not-flat i-classes)
-       [(classC super-field-names super-methods)
+       [(classC super-field-names super-methods parents)
         (classC
          (add-fields super-field-names field-names)
-         (add/replace-methods super-methods methods))])]))
+         (add/replace-methods super-methods methods)
+         empty)])]))
 
 (define (flatten-super [name : Symbol]
                        [classes-not-flat : (Listof (Symbol * Class))] 
@@ -131,7 +139,7 @@
   (type-case ClassI (find i-classes name)
     [(classI super-name field-names i-methods)
      (if (equal? super-name 'Object)
-         (classC empty empty)
+         (classC empty empty empty)
          (flatten-class super-name
                         classes-not-flat
                         i-classes))]))
@@ -159,12 +167,14 @@
             (list (values 'mdist
                           (plusE (getE (thisE) 'x)
                                  (getE (thisE) 'y)))
-                  addDist-c-method))))
+                  addDist-c-method)
+            empty)))
   (define posn3d-c-class
     (values 'Posn3D
             (classC (list 'x 'y 'z)
                     (list posn3d-mdist-c-method
-                          addDist-c-method))))
+                          addDist-c-method)
+                    empty)))
 
   (test (flatten-class 'Posn3D
                        (list posn-c-class-not-flat
