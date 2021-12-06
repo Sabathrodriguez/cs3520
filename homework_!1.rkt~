@@ -1,3 +1,4 @@
+
 #lang plait
 
 (define-type Value
@@ -9,6 +10,11 @@
 
 (define-type Exp
   (numE [n : Number])
+  (if0E [cond : Exp]
+       [t : Exp]
+       [f : Exp])
+  (truE)
+  (falsE)
   (idE [s : Symbol])
   (plusE [l : Exp] 
          [r : Exp])
@@ -31,7 +37,8 @@
   (arrowT [arg : Type]
           [result : Type])
   (varT [is : (Boxof (Optionof Type))])
-  (listofT [elem : Type]))
+  (listofT [elem : Type])
+  (emptyT))
 
 (define-type Binding
   (bind [name : Symbol]
@@ -57,12 +64,26 @@
     [(s-exp-match? `empty s) (emptyE)]
     [(s-exp-match? `NUMBER s) (numE (s-exp->number s))]
     [(s-exp-match? `SYMBOL s) (idE (s-exp->symbol s))]
+    [(s-exp-match? `true s) (truE)]
+    [(s-exp-match? `false s) (falsE)]
     [(s-exp-match? `{+ ANY ANY} s)
      (plusE (parse (second (s-exp->list s)))
             (parse (third (s-exp->list s))))]
     [(s-exp-match? `{* ANY ANY} s)
      (multE (parse (second (s-exp->list s)))
             (parse (third (s-exp->list s))))]
+    [(s-exp-match? `{if0 ANY ANY ANY} s)
+     (if (equal? (second (s-exp->list s)) `true)
+         (if0E (truE)
+              (parse (third (s-exp->list s)))
+              (parse (fourth (s-exp->list s))))
+         (if (equal? (second (s-exp->list s)) `false)
+             (if0E (falsE)
+                  (parse (third (s-exp->list s)))
+                  (parse (fourth (s-exp->list s))))
+             (if0E (parse(second (s-exp->list s)))
+                  (parse (third (s-exp->list s)))
+                  (parse (fourth (s-exp->list s))))))] 
     [(s-exp-match? `{let {[SYMBOL : ANY ANY]} ANY} s)
      (let ([bs (s-exp->list (first
                              (s-exp->list (second
@@ -155,6 +176,11 @@
     [(numE n) (numV n)]
     [(idE s) (lookup s env)]
     [(plusE l r) (num+ (interp l env) (interp r env))]
+    [(truE) (numV 1)]
+    [(falsE) (numV 0)]
+    [(if0E cond t f) (if (equal? (interp cond env) (numV 0))
+                        (interp t env)
+                        (interp f env))]
     [(multE l r) (num* (interp l env) (interp r env))]
     [(lamE n t body)
      (closV n body env)]
@@ -307,6 +333,15 @@
     [(numE n) (numT)]
     [(plusE l r) (typecheck-nums l r tenv)]
     [(multE l r) (typecheck-nums l r tenv)]
+    [(truE) (boolT)]
+    [(falsE) (boolT)]
+    [(if0E cond t f) (local ([define type-res (typecheck t tenv)])
+                       (local ([define cond-type (typecheck cond tenv)])
+                         (begin
+                           (unify! cond-type (numT) cond)
+                           (begin
+                             (unify! type-res (typecheck f tenv) t)
+                             type-res))))]
     [(idE n) (type-lookup n tenv)]
     [(lamE n arg-type body)
      (arrowT arg-type
@@ -321,10 +356,66 @@
                  (typecheck fun tenv)
                  fun)
          result-type))]
-    [(emptyE) ....]
-    [(consE l r) ....]
-    [(firstE a) ....]
-    [(restE a) ....]))
+    [(emptyE) (emptyT)]
+    [(consE l r) (local ([define left (typecheck l tenv)])
+                   (local ([define right (typecheck r tenv)])
+                     (begin
+                       (unify! right (listofT left) r)
+                       (begin
+                         (unify! right (emptyT) r)
+                         (listofT right))
+                       right)))]
+    [(firstE a) (local ([define type-a (typecheck a tenv)])
+                  (begin
+                    (unify! type-a (listofT (emptyT)) a)
+                    type-a))]
+    [(restE a) (local ([define type-a (typecheck a tenv)])
+                  (begin
+                    (unify! type-a (listofT (emptyT)) a)
+                    type-a))]))
+
+(module+ test
+(test (run-prog `empty)
+        `list)
+  (test (run-prog `{cons 1 empty})
+        `list)
+   (test (run-prog `{cons empty empty})
+        `list)
+  (test/exn (run-prog `{cons 1 {cons empty empty}})
+            "no type")
+  (test/exn (run-prog `{first 1})
+            "no type")
+  (test/exn (run-prog `{rest 1})
+            "no type")
+  (test/exn (run-prog `{first empty})
+            "list is empty")
+  (test/exn (run-prog `{rest empty})
+            "list is empty")
+  
+  (test (run-prog `{let {[f : ?
+                            {lambda {[x : ?]} {first x}}]}
+                     {+ {f {cons 1 empty}} 3}})
+        `4)
+  (test (run-prog `{let {[f : ?
+                            {lambda {[x : ?]} {rest x}}]}
+                     {+ {first {f {cons 1 {cons 2 empty}}}} 3}})
+        `5)
+  (test (run-prog `{let {[f : ?
+                            {lambda {[x : ?]}
+                              {lambda {[y : ?]}
+                                {cons x y}}}]}
+                     {first {rest {{f 1} {cons 2 empty}}}}})
+        `2)
+
+  (test/exn (run-prog `{lambda {[x : ?]}
+                         {cons x x}})
+            "no type")
+(test/exn (run-prog `{let {[f : ? {lambda {[x : ?]} x}]}
+                         {cons {f 1} {f empty}}})
+            "no type")
+
+  )
+
 
 (define (typecheck-nums l r tenv)
   (begin
@@ -406,7 +497,10 @@
                             (unify! a1 a2 expr)
                             (unify! b1 b2 expr))]
                          [else (type-error expr t1 t2)])]
-       [(listofT e2) ....])]))
+       [(listofT e2) (unify! e2 t1  expr)]
+       [(emptyT) (type-case Type t1
+                   [(emptyT) (values)]
+                   [else (type-error expr t1 t2)])])]))
 
 (define (resolve [t : Type]) : Type
   (type-case Type t
@@ -415,6 +509,7 @@
        [(none) t]
        [(some t2) (resolve t2)])]
     [else t]))
+
 
 (define (occurs? [r : Type] [t : Type]) : Boolean
   (type-case Type t
@@ -427,7 +522,8 @@
                    (type-case (Optionof Type) (unbox is)
                      [(none) #f]
                      [(some t2) (occurs? r t2)]))]
-    [(listofT e) ....]))
+    [(listofT e) (occurs? r e)]
+    [(emptyT) #f]))
 
 (define (type-error [a : Exp] [t1 : Type] [t2 : Type])
   (error 'typecheck (string-append
@@ -441,6 +537,63 @@
                         (string-append
                          " vs. "
                          (to-string t2))))))))
+
+(define (run-prog [s-exp : S-Exp]) : S-Exp
+  (local [(define result (parse s-exp))]
+    (type-case Type (typecheck result mt-env)
+      [(numT) (number->s-exp (numV-n (interp result mt-env))) ]
+      [(arrowT arg res) (begin
+                           (interp result mt-env)
+                           `function) ]
+      [(listofT elements) (begin
+                            (interp result mt-env)
+                            `list)]
+      [(emptyT) (begin
+                  (interp result mt-env)
+                  `list)]
+      [(boolT) `bool]
+      [(varT is) (type-case Type (resolve (typecheck result mt-env))
+                [(numT) (number->s-exp (numV-n (interp result mt-env))) ]
+                [(arrowT arg res) `function ]
+                [(listofT elements) `list]
+                [(boolT) `bool]
+                [else (error 'run-prog "not a type")])])))
+
+
+(module+ test
+   (test (run-prog `1)
+        `1)
+   (test (run-prog `{if0 0 1 2})
+        `1)
+  (test (run-prog `{if0 2 1 0})
+        `0)
+    (test (run-prog `{if0 2 {lambda {[x : ?]} x} {lambda {[x : ?]} {+ 1 x}}})
+          `function)
+    (test/exn (run-prog `{if0 {lambda {[x : ?]} x} 1 2})
+            "no type")
+  (test/exn (run-prog `{if0 0 {lambda {[x : ?]} x} 2})
+            "no type")
+   (test (run-prog `{let {[f : ?
+                            {lambda {[x : ?]}
+                             {lambda {[y : ?]}
+                              {lambda {[z : ?]}
+                               {if0 x y z}}}}]}
+                    {{{f 1} 2} 3}})
+         `3)
+   (test (run-prog `{let {[f : ?
+                            {lambda {[x : ?]}
+                             {lambda {[y : ?]}
+                              {lambda {[z : ?]}
+                               {if0 x y {lambda ([x : ?]) z}}}}}]}
+                    {{{{f 1} {lambda {[x : num]} 2}} 3} 4}})
+        `3)
+    (test/exn (run-prog `{let {[f : ?
+                                {lambda {[x : ?]}
+                                 {if0 x x {x 1}}}]}
+                        {f 1}})
+            "no type")
+  
+  )
 
 (module+ test
   (define a-type-var (varT (box (none))))

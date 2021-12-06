@@ -2,7 +2,7 @@
 (require "class.rkt"
          "inherit.rkt")
 
-(module+ test
+(module+ test 
   (print-only-errors #t))
 
 ;; ----------------------------------------
@@ -27,9 +27,11 @@
 
 (define (parse-method [s : S-Exp]) : (Symbol * ExpI)
   (cond
-   [(s-exp-match? `[SYMBOL {arg} ANY] s)
+   [(s-exp-match? `[SYMBOL {ANY} ANY] s)
+    (if (s-exp-match? (second (s-exp->list s)) `{this})
+        (error 'parse-method "invalid input")
     (values (s-exp->symbol (first (s-exp->list s)))
-            (parse (third (s-exp->list s))))]
+            (parse (third (s-exp->list s)))))]
    [else (error 'parse-method "invalid input")]))
 
 (define (parse [s : S-Exp]) : ExpI
@@ -37,9 +39,25 @@
    [(s-exp-match? `NUMBER s) (numI (s-exp->number s))]
    [(s-exp-match? `arg s) (argI)]
    [(s-exp-match? `this s) (thisI)]
+   [(s-exp-match? `SYMBOL s) (idI (s-exp->symbol s))]
    [(s-exp-match? `{+ ANY ANY} s)
     (plusI (parse (second (s-exp->list s)))
            (parse (third (s-exp->list s))))]
+   
+   [(s-exp-match? `{let [{SYMBOL : ANY}] ANY} s)
+    (if (s-exp-match? `this (first (s-exp->list (first
+                                         (s-exp->list (second
+                                                       (s-exp->list s)))))))
+         (error 'parse "invalid input")
+    (letI
+     (s-exp->symbol (first (s-exp->list (first
+                                         (s-exp->list (second
+                                                       (s-exp->list s)))))))
+     (parse (third (s-exp->list (first
+                                  (s-exp->list (second
+                                                (s-exp->list s)))))))
+     (parse (third (s-exp->list s)))))]
+   
    [(s-exp-match? `{* ANY ANY} s)
     (multI (parse (second (s-exp->list s)))
            (parse (third (s-exp->list s))))]
@@ -63,6 +81,12 @@
    [else (error 'parse "invalid input")]))
 
 (module+ test
+   (test/exn (parse `{let [{this : 1}] {+ this this}})
+             "invalid input")
+  (test (parse `{let [{x : 1}] {+ x 1}})
+        (letI 'x (numI 1) (plusI (idI 'x) (numI 1))))
+  (test/exn (parse `{let [{1 : 1}] {+ x 1}})
+        "invalid input")
   (test (parse `0)
         (numI 0))
   (test (parse `arg)
@@ -83,8 +107,8 @@
         (sendI (numI 1) 'm (numI 2)))
   (test (parse `{super m 1})
         (superI 'm (numI 1)))
-  (test/exn (parse `x)
-            "invalid input")
+  (test (parse `x)
+            (idI 'x))
 
   (test (parse-field `x)
         'x)
@@ -93,6 +117,8 @@
 
   (test (parse-method `[m {arg} this])
         (values 'm (thisI)))
+  (test/exn (parse-method `[m {this} this])
+        "invalid input")
   (test/exn (parse-method `[m {arg} 1 2])
             "invalid input")
   

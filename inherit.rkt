@@ -9,8 +9,12 @@
   (numI [n : Number])
   (plusI [lhs : ExpI]
          [rhs : ExpI])
+  (letI [a : Symbol] 
+        [rhs : ExpI]
+        [body : ExpI])
   (multI [lhs : ExpI]
          [rhs : ExpI])
+  (idI [arg : Symbol])
   (argI)
   (thisI)
   (newI [class-name : Symbol]
@@ -43,7 +47,9 @@
       [(numI n) (numE n)]
       [(plusI l r) (plusE (recur l) (recur r))]
       [(multI l r) (multE (recur l) (recur r))]
+      [(idI a) (idE a)]
       [(if0I cond tr fls) (if0E (recur cond) (recur tr) (recur fls))]
+      [(letI a rhs body) (letE a (recur rhs) (recur body))]
       [(argI) (argE)]
       [(thisI) (thisE)]
       [(newI class-name field-exprs)
@@ -61,6 +67,10 @@
                (recur arg-expr))])))
 
 (module+ test
+  (test (exp-i->c (letI 'x (numI 1) (plusI (idI 'x) (numI 1))) 'Object)
+        (letE 'x (numE 1) (plusE (idE 'x) (numE 1))))
+  (test (exp-i->c (idI 'x) 'Object)
+        (idE 'x))
   (test (exp-i->c (numI 10) 'Object)
         (numE 10))
   (test (exp-i->c (if0I (numI 0) (numI 1) (numI 2)) 'Object)
@@ -254,7 +264,7 @@
                      (values name
                              (flatten-class name classes-not-flat i-classes))))
                  classes-not-flat))]
-    (interp a classes (objV 'Object empty) (numV 0))))
+    (interp a mt-env classes (objV 'Object empty) (numV 0))))
 
 (module+ test
   (test (interp-i (numI 0) empty)

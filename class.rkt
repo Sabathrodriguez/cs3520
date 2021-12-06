@@ -6,6 +6,10 @@
          [rhs : Exp])
   (multE [lhs : Exp]
          [rhs : Exp])
+  (letE [a : Symbol]
+        [rhs : Exp]
+        [body : Exp])
+  (idE [a : Symbol])
   (argE)
   (thisE)
   (newE [class-name : Symbol]
@@ -22,6 +26,16 @@
   (if0E [cond : Exp]
         [tr : Exp]
         [fls : Exp]))
+
+
+(define-type Binding
+  (bind-v [name : Symbol]
+        [val : Value]))
+
+(define-type-alias Env (Listof Binding))
+
+(define mt-env empty)
+(define extend-env cons)
 
 (define-type Class
   (classC [field-names : (Listof Symbol)]
@@ -46,6 +60,14 @@
          (snd p)
          (find rst-l name))]))
 
+(define (make-lookup [name-of : ('a -> Symbol)] [val-of : ('a -> 'b)])
+  (lambda ([name : Symbol] [vals : (Listof 'a)]) : 'b
+    (type-case (Listof 'a) vals
+      [empty (error 'find "free variable")]
+      [(cons val rst-vals) (if (equal? name (name-of val))
+                               (val-of (first vals))
+                               ((make-lookup name-of val-of) name rst-vals))])))
+
 (module+ test
   (test (find (list (values 'a 1)) 'a)
         1)
@@ -58,15 +80,21 @@
 
 ;; ----------------------------------------
 
-(define interp : (Exp (Listof (Symbol * Class)) Value Value -> Value)
-  (lambda (a classes this-val arg-val)
+(define interp : (Exp Env (Listof (Symbol * Class)) Value Value -> Value)
+  (lambda (a env classes this-val arg-val)
     (local [(define (recur expr)
-              (interp expr classes this-val arg-val))]
+              (interp expr env classes this-val arg-val))]
       (type-case Exp a
         [(numE n) (numV n)]
         [(plusE l r) (num+ (recur l) (recur r))]
         [(multE l r) (num* (recur l) (recur r))]
         [(thisE) this-val]
+        [(letE a rhs body) (interp body
+                               (extend-env
+                                (bind-v a (interp rhs env classes this-val arg-val))
+                                env)
+                               classes this-val arg-val)]
+        [(idE a) (lookup-v a env)]
         [(argE) arg-val]
         [(if0E cond tr fls) (if (equal? (recur cond) (numV 0))
                                 (recur tr)
@@ -101,12 +129,21 @@
            (call-method class-name method-name classes
                         obj arg-val))]))))
 
+(define (lookup-v [n : Symbol] [env : Env]) : Value
+  (type-case (Listof Binding) env
+   [empty (error 'lookup "free variable")]
+   [(cons b rst-env) (cond
+                       [(symbol=? n (bind-v-name b))
+                        (bind-v-val b)]
+                       [else (lookup-v n rst-env)])]))
+
 (define (call-method class-name method-name classes
                      obj arg-val)
   (type-case Class (find classes class-name)
     [(classC field-names methods)
      (let ([body-expr (find methods method-name)])
        (interp body-expr
+               mt-env
                classes
                obj
                arg-val))]))
@@ -153,24 +190,29 @@
   (define posn531 (newE 'Posn3D (list (numE 5) (numE 3) (numE 1))))
 
   (define (interp-posn a)
-    (interp a (list posn-class posn3D-class) (numV -1) (numV -1))))
+    (interp a mt-env (list posn-class posn3D-class) (numV -1) (numV -1))))
 
 ;; ----------------------------------------
 
 (module+ test
-  (test (interp (numE 10) 
+  (test (interp (numE 10)
+                mt-env
                 empty (objV 'Object empty) (numV 0))
         (numV 10))
-  (test (interp (if0E (numE 0) (numE 1) (numE 2)) 
+  (test (interp (if0E (numE 0) (numE 1) (numE 2))
+                mt-env
                 empty (objV 'Object empty) (numV 0))
         (numV 1))
-  (test (interp (if0E (numE 1) (numE 1) (numE 2)) 
+  (test (interp (if0E (numE 1) (numE 1) (numE 2))
+                mt-env
                 empty (objV 'Object empty) (numV 0))
         (numV 2))
   (test (interp (plusE (numE 10) (numE 17))
+                mt-env
                 empty (objV 'Object empty) (numV 0))
         (numV 27))
   (test (interp (multE (numE 10) (numE 7))
+                mt-env
                 empty (objV 'Object empty) (numV 0))
         (numV 70))
 

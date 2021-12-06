@@ -10,12 +10,20 @@
 
 (define-type MethodT
   (methodT [arg-type : Type]
+           [env : Tenv]
            [result-type : Type]
-           [body-expr : ExpI]))
+           [body-expr : ExpI])) 
 
 (define-type Type
   (numT)
   (objT [class-name : Symbol]))
+
+(define-type Binding-T
+  (bind-t [name : Symbol]
+          [exp : ExpI]))
+
+(define-type-alias Tenv (Listof Binding-T))
+
 
 (module+ test
   (print-only-errors #t))
@@ -106,10 +114,10 @@
 
 ;; ----------------------------------------
 
-(define typecheck-expr : (ExpI (Listof (Symbol * ClassT)) Type Type -> Type)
-  (lambda (expr t-classes this-type arg-type)
+(define typecheck-expr : (ExpI Tenv (Listof (Symbol * ClassT)) Type Type -> Type)
+  (lambda (expr env t-classes this-type arg-type)
     (local [(define (recur expr)
-              (typecheck-expr expr t-classes this-type arg-type))
+              (typecheck-expr expr env t-classes this-type arg-type ))
             (define (typecheck-nums l r)
               (type-case Type (recur l)
                 [(numT)
@@ -128,7 +136,13 @@
                                         (is-subtype? flse tru t-classes))
                                     tru
                                     (type-error tru "num"))
-                                (type-error tru "num"))))] 
+                                (type-error tru "num"))))]
+        [(letI a rhs body) (typecheck-expr body
+                                           (extend-env
+                                            (bind-t a rhs)
+                                            env)
+                                           t-classes this-type arg-type)]
+        [(idI a) (recur (lookup a env))]
         [(argI) arg-type]
         [(thisI) this-type]
         [(newI class-name exprs)
@@ -170,6 +184,14 @@
                            arg-expr arg-type
                            t-classes))]))))
 
+(define (lookup [n : Symbol] [env : Tenv]) : ExpI
+  (type-case (Listof Binding-T) env
+   [empty (error 'lookup "free variable")]
+   [(cons b rst-env) (cond
+                       [(symbol=? n (bind-t-name b))
+                        (bind-t-exp b)]
+                       [else (lookup n rst-env)])]))
+
 (define (typecheck-send [class-name : Symbol]
                         [method-name : Symbol]
                         [arg-expr : ExpI]
@@ -179,7 +201,7 @@
                       method-name
                       class-name
                       t-classes)
-    [(methodT arg-type-m result-type body-expr)
+    [(methodT arg-type-m env result-type body-expr)
      (if (is-subtype? arg-type arg-type-m t-classes)
          result-type
          (type-error arg-expr (to-string arg-type-m)))]))
@@ -188,8 +210,8 @@
                           [this-type : Type]
                           [t-classes : (Listof (Symbol * ClassT))]) : ()
   (type-case MethodT method
-    [(methodT arg-type result-type body-expr)
-     (if (is-subtype? (typecheck-expr body-expr t-classes
+    [(methodT arg-type env result-type body-expr)
+     (if (is-subtype? (typecheck-expr body-expr env t-classes
                                       this-type arg-type)
                       result-type
                       t-classes)
@@ -231,25 +253,38 @@
           methods)]))
 
 (define (typecheck [a : ExpI]
+                   [env : Tenv]
                    [t-classes : (Listof (Symbol * ClassT))]) : Type
   (begin
     (map (lambda (tc)
            (typecheck-class (fst tc) (snd tc) t-classes))
          t-classes)
-    (typecheck-expr a t-classes (objT 'Object) (numT))))
+    (typecheck-expr a env t-classes (objT 'Object) (numT))))
 
 ;; ----------------------------------------
 
 (module+ test
+  (test/exn (typecheck (letI 'x (numI 2) (plusI (idI 'y) (idI 'x)))
+                   mt-env
+                   empty)
+        "free variable")
+  (test (typecheck (letI 'x (numI 2) (plusI (idI 'x) (idI 'x)))
+             mt-env
+             empty)
+        (numT))
+  (test (typecheck (letI 'x (thisI) (idI 'x))
+             mt-env
+             empty)
+        (objT 'Object))
   (define posn-t-class
     (values 'Posn
             (classT 'Object
                     (list (values 'x (numT)) (values 'y (numT)))
                     (list (values 'mdist
-                                  (methodT (numT) (numT) 
+                                  (methodT (numT) mt-env (numT) 
                                            (plusI (getI (thisI) 'x) (getI (thisI) 'y))))
                           (values 'addDist
-                                  (methodT (objT 'Posn) (numT)
+                                  (methodT (objT 'Posn) mt-env (numT)
                                            (plusI (sendI (thisI) 'mdist (numI 0))
                                                   (sendI (argI) 'mdist (numI 0)))))))))
 
@@ -258,7 +293,7 @@
             (classT 'Posn
                     (list (values 'z (numT)))
                     (list (values 'mdist
-                                  (methodT (numT) (numT)
+                                  (methodT (numT) mt-env (numT)
                                            (plusI (getI (thisI) 'z) 
                                                   (superI 'mdist (argI)))))))))
 
@@ -269,7 +304,7 @@
                     (list))))
 
   (define (typecheck-posn a)
-    (typecheck a
+    (typecheck a mt-env
                (list posn-t-class posn3D-t-class square-t-class)))
   
   (define new-posn27 (newI 'Posn (list (numI 2) (numI 7))))
@@ -290,19 +325,24 @@
         (objT 'Square))
   
   (test (typecheck (multI (numI 1) (numI 2))
+                   mt-env
                    empty)
         (numT))
   (test (typecheck (if0I (numI 2) (numI 1) (numI 2))
+                   mt-env
                    empty)
         (numT))
   (test/exn (typecheck (if0I (newI 'Object empty) (numI 1) (numI 2))
+                       mt-env
                    empty)
         "no type")
   (test (typecheck (if0I (numI 2) (newI 'Object empty) (newI 'Object empty))
+                   mt-env
                    empty)
         (objT 'Object))
   
   (test/exn (typecheck (if0I (numI 2) (numI 10) (newI 'Object empty))
+                       mt-env
                    empty)
         "no type")
   
@@ -311,36 +351,50 @@
   (test/exn (typecheck-posn (sendI new-posn27 'mdist new-posn27))
             "no type")
   (test/exn (typecheck (plusI (numI 1) (newI 'Object empty))
+                       mt-env
                        empty)
             "no type")
   (test/exn (typecheck (plusI (newI 'Object empty) (numI 1))
+                       mt-env
                        empty)
             "no type")
   (test/exn (typecheck (plusI (numI 1) (newI 'Object (list (numI 1))))
+                       mt-env
                        empty)
             "no type")
   (test/exn (typecheck (getI (numI 1) 'x)
+                       mt-env
                        empty)
             "no type")
   (test/exn (typecheck (numI 10)
+                       mt-env
                        (list posn-t-class
                              (values 'Other
                                      (classT 'Posn
                                              (list)
                                              (list (values 'mdist
-                                                           (methodT (objT 'Object) (numT)
+                                                           (methodT (objT 'Object) mt-env (numT)
                                                                     (numI 10))))))))
             "bad override")
-  (test/exn (typecheck-method (methodT (numT) (objT 'Object) (numI 0)) (objT 'Object) empty)
+  (test/exn (typecheck-method (methodT (numT) mt-env (objT 'Object) (numI 0)) (objT 'Object) empty)
             "no type")
+  (test (typecheck (idI 'x)
+             (list (bind-t 'x (numI 1)))
+             empty)
+        (numT))
+  (test (typecheck (plusI (idI 'x) (numI 1))
+             (list (bind-t 'x (numI 2)))
+             empty)
+        (numT))
   (test/exn (typecheck (numI 0)
+                       mt-env
                        (list square-t-class
                              (values 'Cube
                                      (classT 'Square
                                              empty
                                              (list
                                               (values 'm
-                                                      (methodT (numT) (numT)
+                                                      (methodT (numT) mt-env (numT)
                                                                ;; No such method in superclass:
                                                                (superI 'm (numI 0)))))))))
             "not found"))
@@ -357,7 +411,7 @@
         (map (lambda (m)
                (values (fst m)
                        (type-case MethodT (snd m)
-                         [(methodT arg-type result-type body-expr)
+                         [(methodT arg-type mt-env xrresult-type body-expr)
                           body-expr])))
              methods))])))
   

@@ -87,7 +87,7 @@
           (parse (fourth (s-exp->list s))))
          (if (equal? (second (s-exp->list s)) `false)
           (ifE (falsE)
-          (parse (third (s-exp->list s)))
+          (parse (third (s-exp->list s))) 
           (parse (fourth (s-exp->list s))))
           (ifE (parse(second (s-exp->list s)))
           (parse (third (s-exp->list s)))

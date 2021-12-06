@@ -5,7 +5,7 @@
          "inherit-parse.rkt")
 
 (module+ test
-  (print-only-errors #t)) 
+  (print-only-errors #t))
 
 ;; ----------------------------------------
 
@@ -36,7 +36,6 @@
       (methodT (parse-type (local [(define args (second (s-exp->list s)))
                                    (define arg (first (s-exp->list args)))]
                              (third (s-exp->list arg))))
-               mt-env
                (parse-type (fourth (s-exp->list s)))
                (parse (fourth (rest (s-exp->list s))))))]
     [else (error 'parse-t-method "invalid input")]))
@@ -63,7 +62,7 @@
             "invalid input")
 
   (test (parse-t-method `[m {[arg : num]} : Object this])
-        (values 'm (methodT (numT) mt-env (objT 'Object) (thisI))))
+        (values 'm (methodT (numT) (objT 'Object) (thisI))))
   (test/exn (parse-t-method `{m 1})
             "invalid input")
   
@@ -75,8 +74,8 @@
                 (classT 'Posn
                         (list (values 'x (numT))
                               (values 'y (numT)))
-                        (list (values 'm1 (methodT (numT) mt-env (numT) (argI)))
-                              (values 'm2 (methodT (numT) mt-env (objT 'Object) (thisI)))))))
+                        (list (values 'm1 (methodT (numT) (numT) (argI)))
+                              (values 'm2 (methodT (numT) (objT 'Object) (thisI)))))))
   (test/exn (parse-t-class `{class})
             "invalid input"))
 

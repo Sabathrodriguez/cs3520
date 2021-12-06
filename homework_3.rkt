@@ -8,6 +8,8 @@
   (boolV [value : Boolean])
   (thunkV [delay : Exp]
           [force : Exp]))
+(print-only-errors
+ #t)
 
 (define-type Exp
   (numE [n : Number])
